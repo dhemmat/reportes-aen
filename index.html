@@ -222,6 +222,10 @@ tfoot .total-col { background:#eaf0f8; }
       <div class="card-title" id="ing-tabla-title">Detalle mensual por categoría</div>
       <div class="pivot-wrap" id="ing-pivot"></div>
     </div>
+    <div class="card">
+      <div class="card-title" id="ing-contrib-title">Número de contribuyentes por categoría</div>
+      <div class="pivot-wrap" id="ing-contrib-pivot"></div>
+    </div>
   </div>
 
   <!-- ── TAB: GASTOS ── -->
@@ -420,6 +424,69 @@ function buildPivot(container, rows, catKey, cats, colLabel, colorMap){
   container.innerHTML=''; container.appendChild(table);
 }
 
+// ── CONTRIBUTOR COUNT PIVOT ──
+function buildContribPivot(container, keys, groups, colLabel){
+  const table = document.createElement('table');
+
+  // THEAD
+  const thead = document.createElement('thead');
+  const trH = document.createElement('tr');
+  const th0 = document.createElement('th'); th0.textContent = colLabel; trH.appendChild(th0);
+  keys.forEach(k => {
+    const th = document.createElement('th'); th.textContent = groups[k].label; trH.appendChild(th);
+  });
+  const thTot = document.createElement('th'); thTot.textContent = 'Únicos totales'; thTot.className = 'total-col'; trH.appendChild(thTot);
+  thead.appendChild(trH); table.appendChild(thead);
+
+  // TBODY — one row per category, cells = unique contributor count
+  const tbody = document.createElement('tbody');
+  const catTotals = {}; // cat → Set of all unique names across periods
+
+  ING_CATS.forEach(cat => {
+    const tr = document.createElement('tr');
+    const td0 = document.createElement('td');
+    td0.innerHTML = `<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${cat.color};margin-right:6px;vertical-align:middle"></span>${cat.label}`;
+    tr.appendChild(td0);
+    if(!catTotals[cat.key]) catTotals[cat.key] = new Set();
+    let rowHasData = false;
+    keys.forEach(k => {
+      const td = document.createElement('td');
+      const names = groups[k].catNames && groups[k].catNames[cat.key];
+      if(names && names.size > 0){
+        td.textContent = names.size;
+        names.forEach(n => catTotals[cat.key].add(n));
+        rowHasData = true;
+      } else {
+        td.innerHTML = '<span class="null-cell">—</span>';
+      }
+      tr.appendChild(td);
+    });
+    const tdTot = document.createElement('td');
+    tdTot.textContent = catTotals[cat.key].size > 0 ? catTotals[cat.key].size : '—';
+    tdTot.className = 'total-col';
+    tr.appendChild(tdTot);
+    tbody.appendChild(tr);
+  });
+
+  // Total row — unique contributors across all cats per period
+  const trF = document.createElement('tr'); trF.className = 'total-row';
+  const tdF0 = document.createElement('td'); tdF0.textContent = 'TOTAL ÚNICOS'; trF.appendChild(tdF0);
+  const allTotalNames = new Set();
+  keys.forEach(k => {
+    const periodNames = new Set();
+    ING_CATS.forEach(cat => {
+      const names = groups[k].catNames && groups[k].catNames[cat.key];
+      if(names) names.forEach(n => { periodNames.add(n); allTotalNames.add(n); });
+    });
+    const td = document.createElement('td'); td.textContent = periodNames.size; trF.appendChild(td);
+  });
+  const tdFTot = document.createElement('td'); tdFTot.textContent = allTotalNames.size; tdFTot.className = 'total-col'; trF.appendChild(tdFTot);
+  tbody.appendChild(trF);
+
+  table.appendChild(tbody);
+  container.innerHTML = ''; container.appendChild(table);
+}
+
 // ── RENDER INGRESOS ──
 function renderIngresos(rows){
   const colLabel=_grouping==='month'?'Mes':_grouping==='quarter'?'Trimestre':'Año';
@@ -440,9 +507,11 @@ function renderIngresos(rows){
   let grandTotal=0; const allNames=new Set();
   rows.forEach(r=>{
     const k=groupKey(r.fecha,_grouping);
-    if(!groups[k]) groups[k]={label:groupLabel(k,_grouping),cats:{}};
+    if(!groups[k]) groups[k]={label:groupLabel(k,_grouping),cats:{},catNames:{}};
     if(!groups[k].cats[r.cat]) groups[k].cats[r.cat]=0;
     groups[k].cats[r.cat]+=r.monto;
+    if(!groups[k].catNames[r.cat]) groups[k].catNames[r.cat]=new Set();
+    groups[k].catNames[r.cat].add(r.nombre);
     grandTotal+=r.monto; allNames.add(r.nombre);
   });
   const keys=Object.keys(groups).sort();
@@ -465,6 +534,16 @@ function renderIngresos(rows){
   const gridColor=isDark?'rgba(255,255,255,0.08)':'rgba(0,0,0,0.06)';
   const textColor=isDark?'#aaa':'#555';
 
+  // Store period unique counts for tooltip
+  const _periodUniqueContribs=keys.map(k=>{
+    const allNames=new Set();
+    ING_CATS.forEach(cat=>{
+      const names=groups[k].catNames&&groups[k].catNames[cat.key];
+      if(names) names.forEach(n=>allNames.add(n));
+    });
+    return allNames.size;
+  });
+
   const datasets=ING_CATS.map(cat=>({
     label:cat.label,
     data:keys.map(k=>groups[k].cats[cat.key]||0),
@@ -480,7 +559,16 @@ function renderIngresos(rows){
       responsive:true, maintainAspectRatio:false,
       plugins:{
         legend:{position:'bottom',labels:{font:{size:11},boxWidth:12}},
-        tooltip:{callbacks:{label:ctx=>ctx.dataset.label+': '+fmt(ctx.parsed.y)}}
+        tooltip:{callbacks:{
+          label:ctx=>ctx.dataset.label+': '+fmt(ctx.parsed.y),
+          afterBody:ctx=>{
+            if(ctx.length>0){
+              const i=ctx[0].dataIndex;
+              return ['','Contribuyentes únicos: '+_periodUniqueContribs[i]];
+            }
+            return [];
+          }
+        }},
       },
       scales:{
         x:{stacked:true,grid:{display:false},ticks:{color:textColor,font:{size:11}}},
@@ -489,11 +577,15 @@ function renderIngresos(rows){
     }
   });
 
-  // Pivot table
+  // Pivot table — amounts
   const colorMap={};
   ING_CATS.forEach(c=>colorMap[c.key]=c.color);
   const pivotRows=keys.map(k=>({label:groups[k].label,cats:groups[k].cats}));
   buildPivot(document.getElementById('ing-pivot'), pivotRows, 'cat', ING_CATS, colLabel, colorMap);
+
+  // Contributor count table
+  document.getElementById('ing-contrib-title').textContent='Contribuyentes únicos por categoría — '+groupName;
+  buildContribPivot(document.getElementById('ing-contrib-pivot'), keys, groups, colLabel);
 }
 
 // ── RENDER GASTOS ──
@@ -653,7 +745,51 @@ function renderBalance(){
     SECTION_ORDER.indexOf(a.section)-SECTION_ORDER.indexOf(b.section)
   );
 
+  // Pre-aggregate fondos_propios rows into one summed row per column
+  const fondosPropiosSummed = {}; // colIdx → sum
+  sortedSections.filter(s=>s.section==='fondos_propios').forEach(s=>{
+    filteredGroups.forEach(k=>{
+      const idx=groupColIdx[k];
+      const v=s.values[idx];
+      if(v!==null&&!isNaN(v)){
+        fondosPropiosSummed[idx]=(fondosPropiosSummed[idx]||0)+v;
+      }
+    });
+  });
+  let fondosPropiosRendered=false;
+
   sortedSections.forEach(s=>{
+    // For fondos_propios, skip individual rows and render one combined row instead
+    if(s.section==='fondos_propios'){
+      if(fondosPropiosRendered) return;
+      fondosPropiosRendered=true;
+      // Section header
+      const meta=BAL_SECTION_META['fondos_propios'];
+      const trS=document.createElement('tr');
+      const tdS=document.createElement('td');
+      tdS.colSpan=filteredGroups.length+1;
+      tdS.style.cssText=`background:${meta.bg};color:#fff;font-weight:700;font-size:0.75rem;text-transform:uppercase;letter-spacing:0.05em;padding:0.35rem 0.9rem;position:sticky;left:0;`;
+      tdS.textContent=meta.label;
+      trS.appendChild(tdS); tbody.appendChild(trS);
+      // Single summed row
+      const tr=document.createElement('tr');
+      const td0=document.createElement('td'); td0.textContent='Fondos Propios'; tr.appendChild(td0);
+      filteredGroups.forEach(k=>{
+        const idx=groupColIdx[k];
+        const v=fondosPropiosSummed[idx];
+        const td=document.createElement('td');
+        if(v!==undefined&&!isNaN(v)){
+          td.textContent=fmt(v);
+          if(v<0) td.style.color='#c0392b';
+        } else {
+          td.innerHTML='<span class="null-cell">—</span>';
+        }
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+      return;
+    }
+
     if(s.section!==lastSection){
       const meta=BAL_SECTION_META[s.section]||{label:s.section,bg:'#555',color:'#fff'};
       const trS=document.createElement('tr');
