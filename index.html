@@ -890,11 +890,23 @@ function balIsSkip(name){
   return BAL_SKIP.some(s=>l.startsWith(s));
 }
 
-// Parse month label "abril 2024" → {yr, mo(0-based)}
+// Parse month label "abril 2024" or "abr. 2024" → {yr, mo(0-based)}
 function parseBalMonth(label){
-  const MESES_MAP={enero:0,febrero:1,marzo:2,abril:3,mayo:4,junio:5,
-    julio:6,agosto:7,septiembre:8,octubre:9,noviembre:10,diciembre:11};
-  const parts=String(label).toLowerCase().trim().split(/\s+/);
+  const MESES_MAP={
+    enero:0, ene:0,
+    febrero:1, feb:1,
+    marzo:2, mar:2,
+    abril:3, abr:3,
+    mayo:4, may:4,
+    junio:5, jun:5,
+    julio:6, jul:6,
+    agosto:7, ago:7,
+    septiembre:8, sep:8, sept:8,
+    octubre:9, oct:9,
+    noviembre:10, nov:10,
+    diciembre:11, dic:11,
+  };
+  const parts=String(label).toLowerCase().trim().replace(/\./g,'').split(/\s+/);
   if(parts.length===2){
     const mo=MESES_MAP[parts[0]];
     const yr=parseInt(parts[1]);
@@ -910,8 +922,11 @@ function parseBalance(data){
 
   let hRow=-1;
   for(let i=0;i<raw.length;i++){
-    const c=raw[i]&&raw[i][0]?String(raw[i][0]).trim():'';
-    if(c.toLowerCase().includes('cuenta de distribu')){hRow=i;break;}
+    const c0=raw[i]&&raw[i][0]?String(raw[i][0]).trim():'';
+    const c1=raw[i]&&raw[i][1]?String(raw[i][1]).trim():'';
+    if(c0.toLowerCase().includes('cuenta de distribu')){hRow=i;break;}
+    // New QBO format: col 0 empty, col 1 is a month label like "abr. 2024"
+    if(!c0 && /^[a-záéíóúü]+\.?\s+\d{4}$/i.test(c1)){hRow=i;break;}
   }
   if(hRow===-1) throw new Error('No se encontró encabezado en el Balance General.');
 
