@@ -181,3 +181,99 @@ describe('number formatting', () => {
     assert.match(app.fmt(-5), /^-RD\$5[.,]00$/);
   });
 });
+
+// ── Both QBO export generations ────────────────────────────────────────────
+// QBO changed its export between these two. The differences that mattered:
+//   * report title and organisation name swapped rows
+//   * "Nombre completo de la cuenta" renamed to "División" (same content)
+//   * GL numbers dropped from account names
+//   * "Contabilización (S/N)" → "(Y/N)", "Notas" → "Nota"
+//   * "Fondos propios" → "Fondos propios de los accionistas"  ← broke the parser
+//   * new transaction types (Pago, Transferencia) and many new accounts
+// Only the last one actually broke anything, and only because header labels were
+// matched exactly. Both files are kept so a future export cannot quietly regress
+// either generation.
+const GENERATIONS = [
+  { name: 'Apr 2026', tx: 'Transacciones.xlsx',         bal: 'Balance.xlsx',         months: 25 },
+  { name: 'Sep 2026', tx: 'Transacciones-2026-09.xlsx', bal: 'Balance-2026-09.xlsx', months: 29 },
+];
+
+for (const gen of GENERATIONS) {
+  const tx  = readSample(gen.tx);
+  const bal = readSample(gen.bal);
+  const has = (b) => b ? false : { skip: `docs/samples/${gen.tx} not present` };
+
+  describe(`export generation: ${gen.name}`, () => {
+    test('balance parses with nothing unclassified', { ...has(bal) }, () => {
+      const app = loadApp();
+      app.parseBalance(bal);
+      const d = app.balData;
+      assert.equal(d.months.length, gen.months);
+      assert.deepEqual(d.unknown, [], `unclassified: ${d.unknown.join(', ')}`);
+      assert.ok(d.sections.length > 40);
+    });
+
+    test('every section is populated, including fondos propios',
+      { ...has(bal) }, () => {
+      // Fondos Propios was the one that broke: its header gained a suffix, and an
+      // exact-match lookup orphaned all four accounts under it, zeroing the KPI.
+      const app = loadApp();
+      app.parseBalance(bal);
+      const counts = {};
+      for (const s of app.balData.sections) counts[s.section] = (counts[s.section] || 0) + 1;
+      for (const sec of ['activos','cxcobrar','cxpagar','otros_pasivos',
+                         'fondos_rd','fondos_usd','fondos_propios']) {
+        assert.ok(counts[sec] > 0, `section "${sec}" has no accounts — got ${JSON.stringify(counts)}`);
+      }
+    });
+
+    test('custodial funds are excluded on both sides', { ...has(bal) }, () => {
+      const app = loadApp();
+      app.parseBalance(bal);
+      app.parseTx(tx);
+      assert.deepEqual(app.balData.sections.filter(s => /huqu/i.test(s.name)), []);
+      assert.deepEqual([...app.txRows, ...app.gasRows].filter(r => /huqu/i.test(r.cat)), []);
+      assert.ok(app.excluded.rows > 0, 'custodial movements should have been recorded');
+    });
+
+    test('transactions parse into both buckets with sane dates', { ...has(tx) }, () => {
+      const app = loadApp();
+      app.parseTx(tx);
+      assert.ok(app.txRows.length  > 100, `income rows: ${app.txRows.length}`);
+      assert.ok(app.gasRows.length > 100, `expense rows: ${app.gasRows.length}`);
+      assert.ok(app.txRows.every(r => r.monto > 0));
+      assert.ok(app.gasRows.every(r => r.monto > 0));
+      for (const r of [...app.txRows, ...app.gasRows]) {
+        const y = r.fecha.getFullYear();
+        assert.ok(y >= 2020 && y <= 2100, `implausible date ${r.fecha} on ${r.cat}`);
+      }
+    });
+
+    test('income lands in the four known categories only', { ...has(tx) }, () => {
+      const app = loadApp();
+      app.parseTx(tx);
+      const known = new Set(['Contribuciones de Creyentes','De Asambleas Espirituales Locales',
+                             'Cuerpo Continental de Consejeros','Otras Contribuciones']);
+      for (const r of app.txRows) assert.ok(known.has(r.cat), `unexpected bucket: ${r.cat}`);
+    });
+
+    test('the books balance where the custodial pair agrees', { ...has(bal) }, () => {
+      // Activos - Pasivos = Fondos Propios. Any residual should be the Assembly's own
+      // custodial liability/cash difference, not a parsing error — so it must be small
+      // relative to the balance sheet, not arbitrary.
+      const app = loadApp();
+      app.parseBalance(bal);
+      const d = app.balData;
+      const at = (secs, i) => d.sections.filter(s => secs.includes(s.section))
+                               .reduce((t, s) => t + (s.values[i] || 0), 0);
+      let exact = 0;
+      d.months.forEach((m, i) => {
+        const gap = at(['activos','cxcobrar'], i)
+                  - at(['cxpagar','otros_pasivos','fondos_rd','fondos_usd'], i)
+                  - at(['fondos_propios'], i);
+        if (Math.abs(gap) < 0.01) exact++;
+      });
+      assert.ok(exact > 0, 'the identity never held exactly in any month — parser is wrong');
+    });
+  });
+}

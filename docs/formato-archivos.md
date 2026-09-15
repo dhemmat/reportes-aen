@@ -1,7 +1,13 @@
 # Input file formats (QBO exports)
 
-Reference for the two `.xlsx` files the tool consumes. Derived from the April 2026
-exports kept in [`samples/`](samples/) (not committed — see [`samples/README.md`](samples/README.md)).
+Reference for the two `.xlsx` files the tool consumes, kept in
+[`samples/`](samples/README.md) (not committed).
+
+**QBO changes this format.** Two generations are on record, April 2026 and September 2026,
+and they differ in ways that matter — see [Differences between export
+generations](#differences-between-export-generations). Both are kept as samples and both
+are covered by the tests, so a fix for one cannot silently break the other. Assume it will
+drift again.
 
 Both files are read with SheetJS using `XLSX.read(data, {type:'array', raw:true})` and
 only **the first worksheet** (`wb.SheetNames[0]`, named `Sheet1` in both exports) is used.
@@ -223,6 +229,47 @@ does not risk dropping real activity — worth re-checking if the chart of accou
 Liability sections (`fondos_rd`, `fondos_usd`, `cxpagar`, `otros_pasivos`) are exported as
 **positive** numbers, and negative values inside them mean an overdrawn fund. `fmt()` prints
 `Math.abs(n)`, so the minus sign is dropped and the sign is conveyed only by red text.
+
+### Differences between export generations
+
+Observed between the April 2026 and September 2026 exports of the same two reports. Only
+one of these actually broke anything, but the list is the best available evidence of how
+QBO drifts.
+
+**Transactions**
+
+| | April 2026 | September 2026 |
+|---|---|---|
+| Row 0 / row 1 | report title, then organisation | organisation, then report title |
+| Column D | `Contabilización (S/N)` | `Contabilización (Y/N)` |
+| Column F | `Notas` | `Nota` |
+| **Column H** | `Nombre completo de la cuenta` | **`División`** |
+| Account names | carry GL numbers (`6100019 Reuniones AEN`) | numbers dropped (`Reuniones AEN`) |
+| Transaction types | 5 | 7 — adds `Pago`, `Transferencia` |
+
+Column H being renamed looks alarming, since it is the primary category source, but the
+*content* is unchanged — still account names. Nothing broke, because the parser locates the
+header row by searching column A for `Fecha` and then reads by position rather than by
+header text. The dropped GL numbers simply make `limpiarGasto()` a no-op.
+
+**Balance**
+
+| | April 2026 | September 2026 |
+|---|---|---|
+| Row 0 / row 1 | `Balance`, then organisation | organisation, then `Balance general` |
+| Rows / columns | 81 × 26 | 94 × 30 |
+| **Own-funds header** | `Fondos propios` | **`Fondos propios de los accionistas`** |
+| `Pasivos no corrientes` | present | gone |
+| Accounts | 51 | 65 — adds per-person `Anticipo …` rows, two `Depósito a Plazo`, `ISGP`, `Fundacion Tarbiat`, others |
+| Renamed | `Caja Chica` | `Caja Chica Secretaría` |
+
+The own-funds header gaining a suffix is the one that broke the parser: header labels were
+matched exactly, so all four accounts beneath it were orphaned, **Fondos Propios rendered
+as zero**, and the balance identity was out by the whole of own funds. Header labels are
+now matched by longest prefix, which absorbs suffixes like this one.
+
+That failure was visible rather than silent — the unclassified-accounts warning named the
+four rows — which is the whole argument for that banner.
 
 ### Currency
 

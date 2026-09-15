@@ -1032,6 +1032,21 @@ const BAL_HEADER_SECTION = {
   'fondos propios':'fondos_propios',
 };
 
+// Header labels are matched by prefix, longest key first. QBO renames these between
+// export generations — "Fondos propios" became "Fondos propios de los accionistas" —
+// and an exact match silently orphaned every account underneath.
+//
+// Prefix matching is what broke the old account-skipping list, but it is safe here:
+// this is only ever consulted for rows that carry no figures, so it cannot swallow an
+// account. Longest-first matters because "Fondos Marcados Internacionales - USD"
+// starts with "Fondos Marcados".
+const BAL_HEADER_KEYS = Object.keys(BAL_HEADER_SECTION).sort((a,b)=>b.length-a.length);
+
+function balSectionForHeader(low){
+  for(const k of BAL_HEADER_KEYS){ if(low.startsWith(k)) return BAL_HEADER_SECTION[k]; }
+  return null;
+}
+
 // Subtotal rows, in both the Spanish and English QBO exports.
 const BAL_TOTAL_PREFIXES = ['total para ','total for '];
 // Report footer, e.g. "Accrual Basis Tuesday, 14 April 2026 08:33 PM GMT-04:00".
@@ -1143,7 +1158,8 @@ function parseBalance(data){
     // An account row: it belongs to the deepest recognised section enclosing it.
     let section=null;
     for(let d=stack.length-1;d>=0;d--){
-      if(BAL_HEADER_SECTION[stack[d]]){ section=BAL_HEADER_SECTION[stack[d]]; break; }
+      const sec=balSectionForHeader(stack[d]);
+      if(sec){ section=sec; break; }
     }
     if(esCustodial(name)){
       if(_excluded.cuentas.indexOf(name)===-1) _excluded.cuentas.push(name);

@@ -1,12 +1,20 @@
 # Sample QBO exports
 
-Two real exports from QuickBooks Online, dated 14 April 2026, used to develop and test
-the parsers:
+Real exports from QuickBooks Online, used to develop and test the parsers. **Two
+generations**, because QBO changed the format between them and both must keep working —
+the tests run against both, and `tests/pdf-check.mjs` renders a PDF from each.
 
 | File | QBO report | Contents |
 |---|---|---|
-| `Transacciones.xlsx` | Lista de transacciones por fecha | 2,105 data rows, Apr 2024 – Apr 2026 |
-| `Balance.xlsx` | Balance General, columnas por mes | 72 account rows × 25 monthly columns, `abr. 2024` – `abr. 2026` |
+| `Transacciones.xlsx` | Lista de transacciones por fecha | 14 Apr 2026 export · Apr 2024 – Apr 2026 |
+| `Balance.xlsx` | Balance General, columnas por mes | 14 Apr 2026 export · 25 monthly columns |
+| `Transacciones-2026-09.xlsx` | Lista de transacciones por fecha | 14 Sep 2026 export · Apr 2024 – Aug 2026 |
+| `Balance-2026-09.xlsx` | Balance General, columnas por mes | 14 Sep 2026 export · 29 monthly columns |
+
+What changed between the two is catalogued in
+[`../formato-archivos.md`](../formato-archivos.md#differences-between-export-generations).
+If you add a third generation, name it by its export date and add it to `GENERATIONS` in
+`tests/parse.test.mjs` and `tests/pdf-check.mjs` — that is all the wiring there is.
 
 ## These files are not committed
 
