@@ -47,6 +47,10 @@ directly via `file://` also works — the two CDN scripts load fine over `file:/
 
 Deployment is GitHub Pages serving `main` at the repo root. Pushing to `main` publishes.
 
+QBO changes its export format — twice on record. Both generations are kept as samples and
+both run in the tests, so a fix for one cannot silently break the other. See
+[the catalogue of differences](docs/formato-archivos.md#differences-between-export-generations).
+
 Tests need nothing installed either — Node's built-in runner, against the vendored SheetJS:
 
 ```sh
@@ -255,10 +259,10 @@ neither does.
 Gastos tab, where they were a large share of reported expenses and concentrated in a couple
 of months, making those months look wildly overspent. Income is unaffected today only
 because every custodial receipt happens to be a `Depósito`, which the tool ignores — so
-whoever fixes [deposits](#2-depósito-rows-are-dropped-entirely--671-of-2105-in-the-sample)
+whoever fixes [deposits](#2-depósito-rows-are-dropped-entirely--about-a-third-of-the-transaction-file)
 must apply the exclusion there too, or custodial money walks straight into Ingresos.
 
-**It is disclosed, deliberately.** `renderExclusionNote()` ([1215](index.html#L1215)) prints
+**It is disclosed, deliberately.** `renderExclusionNote()` ([1231](index.html#L1231)) prints
 a line under the report title naming the exclusion and the amount held out. The treasurer
 reconciles this report against QBO by hand, so a total that is intentionally lower than
 QBO's has to say so — otherwise it reads as exactly the kind of unexplained discrepancy that
@@ -296,7 +300,7 @@ pivot, categories ordered by total descending.
 
 KPIs: total assets, total liabilities, own funds — all as of the **last visible column**.
 One table, sections in `SECTION_ORDER` ([887](index.html#L887)), each with a coloured header
-band from `BAL_SECTION_META` ([1040](index.html#L1040)).
+band from `BAL_SECTION_META` ([1055](index.html#L1055)).
 
 KPI aggregation ([713–715](index.html#L713-L715)):
 
@@ -336,13 +340,14 @@ Ordered roughly by how likely they are to produce a wrong number in front of the
 "Sin datos". With the April 2026 sample opened in September 2026, every relative shortcut
 except "Todo el archivo" comes up empty. Fix: anchor them to `_maxDate`.
 
-### 2. `Depósito` rows are dropped entirely — 671 of 2,105 in the sample
+### 2. `Depósito` rows are dropped entirely — about a third of the transaction file
 
-`parseTx()` only recognises `Recibo de venta` and `Gasto`. Deposits are ignored, and in the
-sample they include 22 rows posted to `Contribuciones de Creyentes` and 9 to
-`De Asambleas Espirituales Locales` — real contributions missing from the Ingresos tab. The
-other 398 hit `Fondos sin depositar`, which is the offset side of receipts already counted,
-so this cannot be fixed by simply including all deposits. Needs a decision with the
+`parseTx()` only recognises `Recibo de venta` and `Gasto`. Deposits are ignored — 671 of
+2,105 rows in the April 2026 export, 870 of 2,787 in September. Some are posted to
+`Contribuciones de Creyentes` and `De Asambleas Espirituales Locales`, and those are real
+contributions missing from the Ingresos tab. Most hit `Fondos sin depositar`, which is the
+offset side of receipts already counted, so this cannot be fixed by simply including all
+deposits. Needs a decision with the
 treasurer on which types represent contribution income. `Factura` (3 rows) is dropped too.
 
 ### 3. ~~The balance parser is keyed to hardcoded row indices~~ — FIXED
@@ -389,31 +394,38 @@ real cost lines (`Sueldos`, `Google Suite`) with disbursements from marked funds
 bank account names such as `Banco BPD -RD$ Ahorro - 4029 FN`. **Total Gastos** is therefore
 not the Assembly's operating expenditure. Needs a classification agreed with the treasurer.
 
-### 7. Contributor counts are exact-string distinct
+### 7. `Pago` and `Transferencia` rows are ignored
+
+The September 2026 export introduced two transaction types the parser does not recognise
+(5 rows between them, so immaterial today). They fall through the same `else` that drops
+`Depósito`, without any record that they were seen. Worth folding into whatever decision
+resolves the deposits question.
+
+### 8. Contributor counts are exact-string distinct
 
 `Set` membership on the raw `Nombre` field, so any spelling or accent variation
 (`Fátima Baez` vs `Fátima Báez`) counts as two contributors. Both variants exist in the
 sample. Needs at minimum accent-and-case normalisation.
 
-### 8. Uploading the two files in the wrong boxes fails obscurely
+### 9. Uploading the two files in the wrong boxes fails obscurely
 
 Nothing checks which report is which — hence the plea in the user instructions. Swapping them
 produces "No se encontró encabezado…" if you're lucky, or a nonsense report if you aren't.
 Both files carry their report name in row 0 (`Lista de transacciones por fecha`, `Balance`),
 so this is easy to validate.
 
-### 9. Currency is assumed to be DOP throughout
+### 10. Currency is assumed to be DOP throughout
 
 Everything is labelled `RD$`, including the `Fondos Marcados Internacionales - USD` section.
 Whether QBO exports those columns in DOP or USD has not been verified — see the
 [format spec](docs/formato-archivos.md#currency).
 
-### 10. Smaller items
+### 11. Smaller items
 
 - ~~**No export.**~~ There is a PDF download; see [Downloading a PDF](#downloading-a-pdf).
   There is still no Excel export, which is the better format if the Assembly wants to
   re-pivot the figures rather than read them.
-- **Errors don't clear.** `showError()` ([1370](index.html#L1370)) reveals the message and
+- **Errors don't clear.** `showError()` ([1386](index.html#L1386)) reveals the message and
   nothing hides it again — a fixed retry leaves the stale error visible.
 - **Half-implemented dark mode.** The charts read `prefers-color-scheme`
   ([535](index.html#L535), [643](index.html#L643)) but the page is hardcoded light, so dark-mode
@@ -422,8 +434,9 @@ Whether QBO exports those columns in DOP or USD has not been verified — see th
   `buildPivot`'s `catKey` parameter ([503](index.html#L503)) and `renderBalance`'s
   `groupLabels` ([823](index.html#L823)). `BAL_SECTION_MAP` is gone, and `cxcobrar` — which
   it declared but never reached — is now a real section.
-- ~~**No tests.**~~ `tests/` now covers the parsers and the render path — 24 assertions.
-  Coverage is thin on the filter and grouping logic.
+- ~~**No tests.**~~ `tests/` covers the parsers and render path across both export
+  generations — 53 assertions, plus 18 browser checks. Coverage is thin on the filter and
+  grouping logic.
 - **Assembly name is hardcoded** in two places ([135](index.html#L135),
   [161](index.html#L161)), so re-pointing the tool at another Assembly means editing markup.
 
@@ -477,8 +490,8 @@ document, since the filter bar itself does not print.
 | Income categories or their colours | `ING_CATS` ([373](index.html#L373)) + `categorizarIng()` ([437](index.html#L437)) |
 | Which transaction types count | `parseTx()` ([970](index.html#L970)) |
 | Expense category naming | `limpiarGasto()` ([445](index.html#L445)) |
-| Balance sections / order / colours | `BAL_HEADER_SECTION` ([1023](index.html#L1023)), `BAL_SECTION_META` ([1040](index.html#L1040)), `SECTION_ORDER` ([887](index.html#L887)) |
-| How subtotal / footer rows are recognised | `BAL_TOTAL_PREFIXES`, `BAL_FOOTER_PREFIXES` ([1038](index.html#L1038)) |
+| Balance sections / order / colours | `BAL_HEADER_SECTION` ([1023](index.html#L1023)), `BAL_SECTION_META` ([1055](index.html#L1055)), `SECTION_ORDER` ([887](index.html#L887)) |
+| How subtotal / footer rows are recognised | `BAL_TOTAL_PREFIXES`, `BAL_FOOTER_PREFIXES` ([1053](index.html#L1053)) |
 | Balance KPI composition | `ACTIVO_SECS` / `PASIVO_SECS` / `FONDOS_SECS` ([713–715](index.html#L713-L715)) |
 | Quick-period definitions | `applyQuickPeriod()` ([472](index.html#L472)) |
 | Currency or number formatting | `fmt()` / `fmtShort()` ([418](index.html#L418)) |
