@@ -2,3 +2,8 @@
 report data/
 *.xlsx
 *.xls
+
+# Sample QBO exports are kept locally only (contributor names + balances).
+# The explanatory README in that folder IS tracked.
+docs/samples/*
+!docs/samples/README.md
